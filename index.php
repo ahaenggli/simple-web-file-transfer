@@ -1,8 +1,8 @@
 <?php
 /** Konfiguration  */
-$sso_str='https://'.$_SERVER['HTTP_HOST'].''; // ohne "/" am Ende
-$sso_red='https://'.$_SERVER['HTTP_HOST'].'/'; // so wie erfasst bei SSO-Server
-$sso_app="013675635df2f5dcaab6e20fb1c87d89";
+$sso_str='https://'.$_SERVER['HTTP_HOST'].''; // ohne "/" am Ende (url zum nas)
+$sso_red='https://'.$_SERVER['HTTP_HOST'].'/'; // so wie erfasst bei SSO-Server (redirect)
+$sso_app="013675635df2f5dcaab6e20fb1c87d89"; // key vom nas
 
 $myBaseLink = 'https://'.$_SERVER['HTTP_HOST'].'/';
 
@@ -10,42 +10,34 @@ $ds = DIRECTORY_SEPARATOR;
 $targetPath = dirname( __FILE__ ) . "{$ds}uploads{$ds}";
 if(file_exists("./config.php")) require_once("./config.php");
 
-/** Dokumentation 
- * Login-Schirm:
- *  - nur wenn nicht eingeloggt ($_USER is NULL)
- *  - nur wenn kein Folder-Token 
- *  - nur wenn kein Download-Token
+/** ToDo's
+ *  - Download von ./uploads/ ermöglichen
+ *  - Files/Folder löschen 
+ *  - Foldertoken erneuern (inhalt belassen)
+ *  - File/Folderliste alphabetisch sortieren
+ *  - $.ajax durch XMLHttpRequest ersetzen
+ *  - OWASP Top 10 prüfen/absichern
  * 
- * Upload:
- *  - V: nur bei folderHASH
- *  - R: foldertoken, FileToken
+ ** Doku
+ * Eingeloggt ($_USER is not NULL):
+ *  - Logout-Button
+ *  - Mit Foldertoken: Upload in gewählten Ordner
+ *  - Ohne Foldertoken: Upload direkt in ./uploads/ möglich
+ *  - Ordner erstellen
+ *  - Uploadlinks sehen
+ *  - Downloadlinks sehen
+ * 
+ * Gast ($_USER is NULL):
+ *  - Login-Button
+ *  - Foldertoken: Upload in gewählten Ordner
+ *  - ohne Token: kein Upload möglich
  * 
  * Download:
- *  - V/R: Downloadtoken 
- * 
- * Admin:
- *  - V: notLoggedIn && !isDownload && !isUpload-only
- *  - R: SSO 
+ *  - Nur via Downloadtoken möglich (egal ob Gast oder User)
  */
-
 
 // kein Zeit-Limit
 set_time_limit(0); 
-/*
-class SortingIterator extends ArrayIterator
-{
-    public function __construct(Traversable $iterator, $callback)
-    {
-        if ( ! is_callable($callback)) {
-            throw new InvalidArgumentException(sprintf('Callback must be callable (%s given).', $callback));
-        }
-
-        parent::__construct(iterator_to_array($iterator));
-        $this->uasort($callback);
-    }
-}*/
-
-//$dir = new SortingIterator(new DirectoryIterator($targetPath), 'strnatcasecmp');
 $dir = new DirectoryIterator($targetPath);
 /** globale funktionen */
 function httpGet ($url){
@@ -84,9 +76,7 @@ if(isset($_POST['csrf_token'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token
 // Direkter Page-Aufruf ohne csrf_token? Nein.
 if(isset($_POST['page'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) {returnResponse("csrf_token invalid", "error", 403); exit;}
 
-//Page: sso, nichts, upload, concat
-//if(isset($_GET['page'] && isset($_POST['page']))) {http_response_code(403); exit;}
-//if(isset($_GET['page'] && !isset($_POST['page']))) $_POST['page'] = $_GET['page'];
+//Page: sso, nichts, upload, concat, folder-zeugs
 if(!in_array($_POST['page'], ['sso', 'sso-logout', 'upload', 'concat', 'create_uploadFolder']) && !empty($_POST['page'])) {returnResponse("page not found", "error", 404); exit;}
 $_Page = $_POST['page'];
 
@@ -107,14 +97,12 @@ if(isset($sso_accesstoken)){
   if($json_resp["success"]==true){
     $_USER = $json_resp["data"];
     $_SESSION["sso_accesstoken"] = $sso_accesstoken;      
-    if($_Page == 'sso'){ http_response_code(200); echo json_encode($_USER); exit;}
-    
+    if($_Page == 'sso'){ http_response_code(200); echo json_encode($_USER); exit;} 
     //var_dump($foldertoken );
   }else {
     unset($_SESSION["sso_accesstoken"]);
     unset($_POST["sso_accesstoken"]);   
   }     
-
   //var_dump($sso_accesstoken);
 }
 
@@ -122,7 +110,7 @@ if(isset($sso_accesstoken)){
 if($_Page == 'sso') {returnResponse("sso invalid", "error", 403); exit;}
 
 if(isset($_POST['foldertoken'])) $_GET['foldertoken'] = $_POST['foldertoken'];
-if(isset($_GET['foldertoken'])){
+if(isset($_GET['foldertoken']) && !empty($_GET['foldertoken'])){
   foreach ($dir as $fileinfo) {
     if ($fileinfo->isDir() && !$fileinfo->isDot()) {          
         if(file_exists($fileinfo->getPathname().'/.hash')) {
@@ -132,14 +120,12 @@ if(isset($_GET['foldertoken'])){
           $folderhash   = $tmp;
 
           if(isset($_GET['downloadtoken'])){
-
             if (is_dir($fileinfo->getPathname())){
               if ($dh = opendir($fileinfo->getPathname())){
                 while (($file = readdir($dh)) !== false){                    
                   if(!is_dir($file) && !in_array($file, array('.','..', '.hash'))){
                     $file = $fileinfo->getFilename().$ds.$file;
                     if(md5($file) == $_GET['downloadtoken']){
-
                       header('Content-Description: File Transfer');
                       header('Content-Type: application/octet-stream');
                       header('Content-Disposition: attachment; filename="'.basename($file).'"');
@@ -149,15 +135,12 @@ if(isset($_GET['foldertoken'])){
                       header('Content-Length: ' . filesize($file));
                       readfile($file);
                       exit;
-
-                      die("ok");
                     }
                   }
                 }
                 closedir($dh);
               }
             }
-
 
             returnResponse("page not found", "error", 404);
           }
@@ -170,7 +153,6 @@ if(isset($_GET['foldertoken'])){
  if(empty($foldertoken)) {returnResponse("token invalid", "error", 403); exit;}
 }
 
-
 // Upload i.O. falls eingelogg ODER FolderUpload-Token ist i.O.
 if(!$_allowUpload && $_USER !== NULL) $_allowUpload = true;
 elseif(!empty($foldertoken))  $_allowUpload = true;
@@ -179,15 +161,15 @@ if($_Page == 'create_uploadFolder' && $_USER !== NULL){
   $foldername = $_POST['folder'];
   if(!file_exists($targetPath.$foldername)) mkdir($targetPath.$foldername, 0644);
   if(!file_exists($targetPath.$foldername.'/.hash')) file_put_contents($targetPath.$foldername.'/.hash', bin2hex(random_bytes(16)));
-
 }
 
-/*if(empty($foldertoken) && $_USER != NULL && in_array($_Page, ['upload', 'concat'])) 
+if(empty($foldertoken) && $_USER != NULL && in_array($_Page, ['upload', 'concat', ''])) 
 {
-  $foldertoken = $_USER['user_name'];
-  mkdir($targetPath.$foldertoken, 0644);
-  if(!file_exists($targetPath.$foldertoken.'/.hash')) file_put_contents($targetPath.$foldertoken.'/.hash', bin2hex(random_bytes(32)));
-}*/
+  $foldertoken = $ds;
+  $folderhash   = NULL;
+  //mkdir($targetPath.$foldertoken, 0644);
+  //if(!file_exists($targetPath.$foldertoken.'/.hash')) file_put_contents($targetPath.$foldertoken.'/.hash', bin2hex(random_bytes(32)));
+}
 
 // Upload-Page
 if($_Page == 'upload'){  
@@ -261,7 +243,7 @@ if($_Page == 'concat'){
 <body>
 
 <div class="jumbotron text-center">
-  <h1>simple web file transfer | `'sig kreativ. jetzt.'`</h1>  
+  <h1>simple web file transfer | <a href="<?php echo $myBaseLink;?>">`'sig kreativ. jetzt.'`</a></h1>  
   <div class="row form-signin" style="float:right;">
     <?php if($_USER === NULL) { ?>
     <!-- nicht eingeloggt -->
@@ -379,9 +361,6 @@ if($_Page == 'concat'){
 
 </script>
 <?php } ?>
-
-
-
 
 <!-- Synology-Login/LogOut --> 
 <script src="https://code.jquery.com/jquery-3.5.1.min.js" integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0=" crossorigin="anonymous"></script>
