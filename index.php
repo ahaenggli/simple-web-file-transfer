@@ -11,7 +11,8 @@ $targetPath = dirname( __FILE__ ) . "{$ds}uploads{$ds}";
 if(file_exists("./config.php")) require_once("./config.php");
 
 /** ToDo's
- *  - Download von ./uploads/ ermöglichen
+ *  - cccDownload von ./uploads/ ermöglichen
+ *  - ganze Ordner hochladen/unterordner behalten
  *  - Files/Folder löschen 
  *  - Foldertoken erneuern (inhalt belassen)
  *  - File/Folderliste alphabetisch sortieren
@@ -206,6 +207,9 @@ if($_Page == 'concat'){
       // get variables
     $fileId = $_POST['dzuuid'];
     $chunkTotal = $_POST['dztotalchunkcount'];
+    $fullpath = $_POST['fullpath'];
+    $fullpath = str_replace('/', '_', $fullpath);
+    $fullpath = str_replace('\\', '_', $fullpath);
 
     // file path variables
     $fileType = $_POST['dzfilename'];
@@ -218,7 +222,7 @@ if($_Page == 'concat'){
       $chunk = file_get_contents($temp_file_path);
       if ( empty($chunk) ) returnResponse("Error: chunk empty", 415);
       // add chunk to main file
-      file_put_contents("{$targetPath}{$fileId}.{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
+      file_put_contents("{$targetPath}{$fullpath}.{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
       // delete chunk
       unlink($temp_file_path);
       if ( file_exists($temp_file_path) ) returnResponse("error: temp not deleted",415);
@@ -319,7 +323,11 @@ if($_Page == 'concat'){
 
 <script type="text/javascript">
 
-  Dropzone.options.imageUpload = {
+      Dropzone.autoDiscover = false;
+        var myDropzone = new Dropzone("#image-upload", 
+         
+  //Dropzone.options.imageUpload =
+   {
         //TuttiQuanti - Filtermöglichkeiten => acceptedFiles: "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.ppt,.pptx,.pages,.odt,.rtf,.heif,.hevc",
         maxFilesize: 10240, // megabytes
         timeout: 0, // kein Timeout
@@ -352,12 +360,39 @@ if($_Page == 'concat'){
                   Dropzone._errorProcessing([currentFile], xhr.responseText);
               }
           };
-          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&foldertoken=<?php echo $folderhash;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
+          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&foldertoken=<?php echo $folderhash;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&fullpath=" + currentFile.fullPath + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
         },
 
         error: function (file, response) { alert(response);},
+
+        init: function() {
+                this.on("sending", function(file, xhr, data) {
+                    if(file.fullPath){
+                        data.append("fullPath", file.fullPath);
+                    }
+                });
+      },
+
         //success: function (file, response) {_this = this; setTimeout(function(){_this.removeFile(file);}, 3000);},
-  };
+  }
+
+);
+
+
+
+// add paste event listener to the page
+document.onpaste = function(event){
+  var items = (event.clipboardData || event.originalEvent.clipboardData).items;
+  for (index in items) {
+    var item = items[index];
+    if (item.kind === 'file') {
+      // adds the file to your dropzone instance
+      //alert("file");
+      myDropzone.addFile(item.getAsFile())
+    } //else alert(item);
+  }
+}
+
 
 </script>
 <?php } ?>
