@@ -8,6 +8,9 @@ $myBaseLink = 'https://'.$_SERVER['HTTP_HOST'].'/';
 
 $ds = DIRECTORY_SEPARATOR;
 $targetPath = dirname( __FILE__ ) . "{$ds}uploads{$ds}";
+$uploadPath = null;
+$foldertokens = ['dd40a84c1fea7e065ca216bc6b9917c7'=>$targetPath.'SeMaDemo'];
+
 if(file_exists("./config.php")) require_once("./config.php");
 
 /** ToDo's
@@ -112,65 +115,67 @@ if($_Page == 'sso') {returnResponse("sso invalid", "error", 403); exit;}
 
 if(isset($_POST['foldertoken'])) $_GET['foldertoken'] = $_POST['foldertoken'];
 if(isset($_GET['foldertoken']) && !empty($_GET['foldertoken'])){
-  foreach ($dir as $fileinfo) {
-    if ($fileinfo->isDir() && !$fileinfo->isDot()) {          
-        if(file_exists($fileinfo->getPathname().'/.hash')) {
-        $tmp = file_get_contents($fileinfo->getPathname().'/.hash');
-        if($tmp == $_GET['foldertoken']){
-          $foldertoken  = $fileinfo->getFilename();
-          $folderhash   = $tmp;
 
-          if(isset($_GET['downloadtoken'])){
-            if (is_dir($fileinfo->getPathname())){
-              if ($dh = opendir($fileinfo->getPathname())){
-                while (($file = readdir($dh)) !== false){                    
-                  if(!is_dir($file) && !in_array($file, array('.','..', '.hash'))){
-                    $file = $fileinfo->getFilename().$ds.$file;
-                    if(md5($file) == $_GET['downloadtoken']){
-                      header('Content-Description: File Transfer');
-                      header('Content-Type: application/octet-stream');
-                      header('Content-Disposition: attachment; filename="'.basename($file).'"');
-                      header('Expires: 0');
-                      header('Cache-Control: must-revalidate');
-                      header('Pragma: public');
-                      header('Content-Length: ' . filesize($file));
-                      readfile($file);
-                      exit;
-                    }
-                  }
-                }
-                closedir($dh);
-              }
-            }
-
-            returnResponse("page not found", "error", 404);
+  if(isset($foldertokens[$_GET['foldertoken']])) {
+    $foldertoken = $foldertokens[$_GET['foldertoken']];
+    $folderhash = $_GET['foldertoken'];
+    $uploadPath = realpath($foldertoken).$ds;
+  }
+  else  {returnResponse("token invalid", "error", 403); exit;}
+  if(empty($foldertoken)) {returnResponse("token invalid", "error", 403); exit;}
+}
+/*
+if(isset($_GET['downloadtoken'])){
+  if (is_dir($fileinfo->getPathname())){
+    if ($dh = opendir($fileinfo->getPathname())){
+      while (($file = readdir($dh)) !== false){                    
+        if(!is_dir($file) && !in_array($file, array('.','..', '.hash'))){
+          $file = $fileinfo->getFilename().$ds.$file;
+          if(md5($file) == $_GET['downloadtoken']){
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="'.basename($file).'"');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate');
+            header('Pragma: public');
+            header('Content-Length: ' . filesize($file));
+            readfile($file);
+            exit;
           }
-
-          //die($foldertoken);
         }
       }
+      closedir($dh);
     }
- }
- if(empty($foldertoken)) {returnResponse("token invalid", "error", 403); exit;}
-}
-
+  }
+*/
 // Upload i.O. falls eingelogg ODER FolderUpload-Token ist i.O.
 if(!$_allowUpload && $_USER !== NULL) $_allowUpload = true;
 elseif(!empty($foldertoken))  $_allowUpload = true;
+if(empty($uploadPath) && $_USER !== NULL) $uploadPath = $targetPath;
 
 if($_Page == 'create_uploadFolder' && $_USER !== NULL){
   $foldername = $_POST['folder'];
   if(!file_exists($targetPath.$foldername)) mkdir($targetPath.$foldername, 0644);
   if(!file_exists($targetPath.$foldername.'/.hash')) file_put_contents($targetPath.$foldername.'/.hash', bin2hex(random_bytes(16)));
 }
+$cd = '';
+if(isset($_POST['cd']) && !empty($_POST['cd']) && $_allowUpload) $_GET['cd'] = $_POST['cd'];
+if(isset($_GET['cd']) && !empty($_GET['cd']) && $_allowUpload){
+ if(file_exists($targetPath.$_GET['cd'])) {
+   $cd = $_GET['cd'];
+   $uploadPath = realpath($targetPath.$cd.$ds).$ds;
+   if(!empty($foldertoken) && strpos($uploadPath, $foldertoken) === false){returnResponse("token invalid", "error", 403); exit;}
+ }
+}
 
-if(empty($foldertoken) && $_USER != NULL && in_array($_Page, ['upload', 'concat', ''])) 
+
+/*if(empty($foldertoken) && $_USER != NULL && in_array($_Page, ['upload', 'concat', ''])) 
 {
   $foldertoken = $ds;
   $folderhash   = NULL;
   //mkdir($targetPath.$foldertoken, 0644);
   //if(!file_exists($targetPath.$foldertoken.'/.hash')) file_put_contents($targetPath.$foldertoken.'/.hash', bin2hex(random_bytes(32)));
-}
+}*/
 
 // Upload-Page
 if($_Page == 'upload'){  
@@ -184,8 +189,8 @@ if($_Page == 'upload'){
   $fileType = strtolower(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION));
   $fileSize = $_FILES["file"]["size"];
   $filename = "{$fileId}-{$chunkIndex}.tmp";
-  $targetPath .= $foldertoken.$ds;
-  $targetFile = $targetPath . $filename;
+
+  $targetFile = $uploadPath . $filename;
   
   //$returnResponse("nok");
   move_uploaded_file($_FILES['file']['tmp_name'], $targetFile);
@@ -208,21 +213,27 @@ if($_Page == 'concat'){
     $fileId = $_POST['dzuuid'];
     $chunkTotal = $_POST['dztotalchunkcount'];
     $fullpath = $_POST['fullpath'];
-    $fullpath = str_replace('/', '_', $fullpath);
-    $fullpath = str_replace('\\', '_', $fullpath);
-
+    $fullpath = str_replace('/', $ds, $fullpath);
+    $fullpath = str_replace('\\', $ds, $fullpath);
+    $fullpath = str_replace($ds.$ds, $ds, $fullpath);
+    //$fullpath = str_replace($ds, '_', $fullpath);
     // file path variables
     $fileType = $_POST['dzfilename'];
-    $targetPath .= $foldertoken.$ds;
+    if($fileType == $fullpath) $fullpath = null;
+    if($fullpath != 'undefined' && !empty($fullpath)) {
+      $fileType = $fullpath;//.$ds.$fileType;
+      mkdir(dirname($uploadPath.$ds.$fileType), 0777, true);
+    }
+
     // Teile durchgehen und zusammensetzen
     for ($i = 1; $i <= $chunkTotal; $i++) {
       // target temp file
-      $temp_file_path = realpath("{$targetPath}{$fileId}-{$i}.tmp") or returnResponse("error: chunk lost.",415);
+      $temp_file_path = realpath("{$uploadPath}{$fileId}-{$i}.tmp") or returnResponse("error: chunk lost.",415);
       // copy chunk
       $chunk = file_get_contents($temp_file_path);
       if ( empty($chunk) ) returnResponse("Error: chunk empty", 415);
       // add chunk to main file
-      file_put_contents("{$targetPath}{$fullpath}.{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
+      file_put_contents("{$uploadPath}{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
       // delete chunk
       unlink($temp_file_path);
       if ( file_exists($temp_file_path) ) returnResponse("error: temp not deleted",415);
@@ -240,9 +251,16 @@ if($_Page == 'concat'){
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.css">  
+  <link rel="stylesheet" href="//cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">  
   
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/7.8.7/polyfill.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/select/1.3.1/js/dataTables.select.min.js"></script>
+
 </head>
 <body>
 
@@ -264,33 +282,65 @@ if($_Page == 'concat'){
 <?php if($_allowUpload) { ?>
 <div class="container">
 
-<?php if((!empty($foldertoken))){   ?>
+<?php if((!empty($uploadPath))){   ?>
 
   <div class="row">
     <div class="col-md-12">
-      <h3><?php echo $foldertoken; ?></h3>
+      <h3><a href="<?php echo $myBaseLink;?>?foldertoken=<?php echo $folderhash; ?>&cd=<?php echo $cd;?>"><?php echo (!empty($foldertoken))?$foldertoken:$cd; ?></a></h3>
       <form action="/" method="post" enctype="multipart/form-data" class="dropzone" id="image-upload">
       <input type="hidden" name="page" value="upload">
       <input type="hidden" name="csrf_token" value="<?php echo $_CSRFTOKEN;?>">
       <input type="hidden" name="foldertoken" value="<?php echo $folderhash;?>">
+      <input type="hidden" name="cd" value="<?php echo $cd;?>">
       </form>
     </div>
   </div>
 <?php } ?>
 
-  <?php if($_USER !== NULL) {    
-    echo '  <div class="row">
+  <?php if($_USER !== NULL || $_allowUpload) {    
+    $dir = new DirectoryIterator($uploadPath);
+    ?>  <div class="row">
             <div class="col-md-12">  
-              <h3>Linkliste:</h3>';
+           
+            <form action="/" method="post">
+      <input type="hidden" name="page" value="create_uploadFolder">
+      <input type="hidden" name="csrf_token" value="<?php echo $_CSRFTOKEN;?>">
+      Ordner <input type="text" name="folder" value="<?php echo $_USER['user_name'];?>">
+      <input type="submit" value="erstellä">
+      </form>     
+           
+           
+           
+            <table id="myTable">
+              
+            <thead>
+            <tr>
+                <th>Namä</th>
+                <th>Grössi</th>
+                <th>Datum</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php 
     
-    foreach ($dir as $fileinfo) {
-        if ($fileinfo->isDir() && !$fileinfo->isDot()) {
-            if(!file_exists($fileinfo->getPathname().'/.hash')) file_put_contents($fileinfo->getPathname().'/.hash', bin2hex(random_bytes(16)));            
-            if(file_exists($fileinfo->getPathname().'/.hash')){
-              $tmp = file_get_contents($fileinfo->getPathname().'/.hash');
-              echo '== <a href="'.$myBaseLink.'?foldertoken='.$tmp.'">./'.$fileinfo->getFilename().'/</a><br>';
+    $folders = [];
+    $dateien = [];
 
-              if (is_dir($fileinfo->getPathname())){
+    foreach ($dir as $fileinfo) {
+        if ($fileinfo->isDir()) {
+            //f(!file_exists($fileinfo->getPathname().'/.hash')) file_put_contents($fileinfo->getPathname().'/.hash', bin2hex(random_bytes(16)));            
+            //if(file_exists($fileinfo->getPathname().'/.hash')){
+            //  $tmp = file_get_contents($fileinfo->getPathname().'/.hash');
+              //echo '== <a href="'.$myBaseLink.'?foldertoken='.$tmp.'">./'.$fileinfo->getFilename().'/</a><br>';
+          
+              if(!$fileinfo->isDot()) $folders[] =  [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(), 
+              
+              str_replace(
+              $targetPath
+                , '', $fileinfo->getPathname())
+            ];
+              /*if (is_dir($fileinfo->getPathname())){
                 if ($dh = opendir($fileinfo->getPathname())){
                   while (($file = readdir($dh)) !== false){                    
                     if(!is_dir($file) && !in_array($file, array('.','..', '.hash'))){
@@ -301,19 +351,27 @@ if($_Page == 'concat'){
                   }
                   closedir($dh);
                 }
-              }
+              }*/
 
 
-            }
-        }
+            //}
+        } else $dateien[] = [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(), $fileinfo->getPathname()]; //echo '<tr><td>'.$fileinfo->getFilename().'</td><td>'.$fileinfo->getSize().' bytes</td></tr>';
     }
+
+   
+    foreach($folders as $fileinfo){
+      echo '<tr><td><a href="?foldertoken='.$folderhash.'&cd='.$fileinfo[3].'">'.$fileinfo[0].'</a></td><td>Ordner</td><td>'.date("d.m.Y H:i:s", $fileinfo[2]).'</td><td>...</td></tr>';
+    }
+
+    foreach($dateien as $fileinfo){
+      echo '<tr><td>'.$fileinfo[0].'</td><td>'.$fileinfo[1].' bytes</td><td>'.date("d.m.Y H:i:s", $fileinfo[2]).'</td><td>...</td></tr>';
+  }
+
+
     ?>
-      <form action="/" method="post">
-      <input type="hidden" name="page" value="create_uploadFolder">
-      <input type="hidden" name="csrf_token" value="<?php echo $_CSRFTOKEN;?>">
-      ./<input type="text" name="folder" value="<?php echo $_USER['user_name'];?>">/
-      <input type="submit" value="erstellä">
-      </form>
+        </tbody>
+    </table>
+     
     <?PHP
     echo '</div></div>';
 } ?>
@@ -360,7 +418,7 @@ if($_Page == 'concat'){
                   Dropzone._errorProcessing([currentFile], xhr.responseText);
               }
           };
-          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&foldertoken=<?php echo $folderhash;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&fullpath=" + currentFile.fullPath + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
+          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&foldertoken=<?php echo $folderhash;?>&cd=<?php echo $cd;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&fullpath=" + currentFile.fullPath + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
         },
 
         error: function (file, response) { alert(response);},
@@ -398,9 +456,23 @@ document.onpaste = function(event){
 <?php } ?>
 
 <!-- Synology-Login/LogOut --> 
-<script src="https://code.jquery.com/jquery-3.5.1.min.js" integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0=" crossorigin="anonymous"></script>
+
 <script type="text/javascript" src="<?php echo $sso_str;?>/webman/sso/synoSSO-1.0.0.js"></script>
 <script>
+
+
+$(document).ready( function () {
+    $('#myTable').DataTable({
+            "searching": false,
+            "paging": false,
+            "bInfo" : false,
+            "ordering": false,
+            
+
+        });
+} );
+
+
   var doRed = false;
 
   SYNOSSO.init({          
