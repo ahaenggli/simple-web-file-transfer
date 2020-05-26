@@ -1,5 +1,6 @@
 ## Features
-* (Anonymes) Hochladen von Dateien und Ordnern (inkl. Unterordner) 
+* (Anonymes) Hochladen von Dateien und Ordnern (inkl. Unterordner)  
+(Bilder/Screenshots aus Zwischenablage funktionieren ebenfalls)
 * (Anonymes) Löschen von Dateien und Ordnern (inkl. Unterordner) 
 * (Anonymes) Herunterladen von Dateien (sofern Downloadtoken vorhanden) 
 * SSO-Login mit Synology NAS
