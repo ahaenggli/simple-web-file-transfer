@@ -52,13 +52,14 @@ $_USER = NULL;
 $_allowUpload = false;
 
 // Einfach aber effektiv
-if(isset($_POST['csrf_token'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) {returnResponse("csrf_token invalid", "error", 403); }
-
+if(isset($_GET['csrf_token']) && !isset($_POST['csrf_token'])) $_POST['csrf_token']  = $_GET['csrf_token'];
+if(isset($_POST['csrf_token'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) returnResponse("csrf_token invalid 1", "error", 403); 
+if(isset($_GET['page']) && !isset($_POST['page'])) $_POST['page']  = $_GET['page'];
 // Direkter Page-Aufruf ohne csrf_token? Nein.
-if(isset($_POST['page'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) {returnResponse("csrf_token invalid", "error", 403); }
+if(isset($_POST['page'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) returnResponse("csrf_token invalid ".$_CSRFTOKEN, "error", 403); 
 
 //Page: sso, nichts, upload, concat, folder-zeugs
-if(!in_array($_POST['page'], ['sso', 'sso-logout', 'upload', 'concat', 'create_uploadFolder', 'create_uploadlink', 'create_downloadlink']) && !empty($_POST['page'])) {returnResponse("page not found", "error", 404); }
+if(!in_array($_POST['page'], ['sso', 'sso-logout', 'upload', 'concat', 'create_uploadFolder', 'create_uploadlink', 'create_downloadlink', 'log']) && !empty($_POST['page'])) returnResponse("page not found", "error", 404); 
 $_Page = $_POST['page'];
 
 //SSO Access-Token
@@ -87,6 +88,15 @@ if(isset($sso_accesstoken)){
 
 // Hätte vorher abgehandelt werden müssen...
 if($_Page == 'sso') returnResponse("sso invalid", "error", 403); 
+
+// log
+if($_Page == 'log'){
+  echo '{';
+  $log = date("Y-m-d H:i:s").'|'.$_GET['start'].'|'.$_GET['ende'].'|'.$_GET['size'].'|'.$_GET['anzahl'].'|'.$_GET['chunks'].'|'."\n";
+  file_put_contents('./log_'.date("Y-m-d").'.log', $log, FILE_APPEND | LOCK_EX);
+  die('}');
+}
+
 
 if(isset($_POST['foldertoken']) && !empty($_POST['foldertoken'])) $_GET['foldertoken'] = $_POST['foldertoken'];
 if(isset($_GET['foldertoken']) && !empty($_GET['foldertoken'])){
@@ -435,6 +445,14 @@ usort($dateien, function($a, $b) {
 
 <script type="text/javascript">
 
+
+        var start = null;
+        var size = 0;
+        var anza = 0;
+        var chunks = 0;
+        var ende = null;
+
+
         Dropzone.autoDiscover = false;
 
         var myDropzone = new Dropzone("#image-upload",   {
@@ -475,13 +493,37 @@ usort($dateien, function($a, $b) {
 
         error: function (file, response) { alert(response);},
         init: function() {
+
+              this.on("addedfile", function(file, xhr, data) {
+                    start = start || new Date().getTime();
+                    size = size+file.size;                
+                    anza++;  
+                });
+
                 this.on("sending", function(file, xhr, data) {
+                    chunks++;  
                     if(file.fullPath){
-                        data.append("fullPath", file.fullPath);
+                        data.append("fullPath", file.fullPath);                                                
                     }
                 });
-                this.on("queuecomplete", function(files, response) {
-                  location.reload();
+                this.on("queuecomplete", function() {
+                  ende = new Date().getTime();
+                  let link = "<?php echo $myBaseLink;?>?page=log&csrf_token=<?php echo $_CSRFTOKEN;?>&start=" + start + "&ende=" + ende + "&size=" + size + "&anzahl=" + anza+ "&chunks=" + chunks;
+                  //alert(link);
+                  fetch(link)
+                  .then(function (response) {
+                    return response.json();
+                  })
+                  .then(function (myJson) {
+                    //console.log(myJson);
+                    location.reload();
+                  })
+                  .catch(function (error) {
+                    console.log("Error: " + error);
+                    location.reload();
+                  });
+                  
+                  //location.reload();
         });
            
 
