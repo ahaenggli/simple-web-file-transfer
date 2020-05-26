@@ -459,7 +459,7 @@ usort($dateien, function($a, $b) {
         //TuttiQuanti - Filtermöglichkeiten => acceptedFiles: "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.ppt,.pptx,.pages,.odt,.rtf,.heif,.hevc",
         maxFilesize: 10240, // megabytes
         timeout: 0, // kein Timeout
-        parallelUploads: 10, // nötzt nüd, so schadets höffetli au nüd
+        parallelUploads: 1, // nötzt nüd, so schadets höffetli au nüd
         chunking: true,      // jo, mer wänd euses File ufteile
         forceChunking: true, // jo, au au denne teile wenn chli gnueg wäri (so lauft's serverseitig de immer glich)
         parallelChunkUploads: true, // teili parallel ufelade
