@@ -1,4 +1,6 @@
 <?php
+// Melde alle PHP Fehler (siehe Changelog)
+//error_reporting(E_ALL);
 /** Konfiguration  */
 $sso_str='https://'.$_SERVER['HTTP_HOST'].''; // ohne "/" am Ende (url zum nas)
 $sso_red='https://'.$_SERVER['HTTP_HOST'].'/'; // so wie erfasst bei SSO-Server (redirect)
@@ -18,7 +20,9 @@ if(file_exists($targetPath.$ds.'foldertokens.php')) require_once($targetPath.$ds
 if(file_exists($targetPath.$ds.'downloadtokens.php')) require_once($targetPath.$ds.'downloadtokens.php');
 
 // kein Zeit-Limit
-set_time_limit(0); 
+//ignore_user_abort(true);
+set_time_limit(0);
+
 $dir = new DirectoryIterator($targetPath);
 /** globale funktionen */
 function httpGet ($url){
@@ -139,13 +143,78 @@ if(isset($_GET['downloadtoken'])){
   $file = $downloadtokens[$_GET['downloadtoken']];
   if(!file_exists($file)) returnResponse("downloadtoken invalid", 404);
   
+  // damit kein out of memory kommt
+  $memory_limit = ini_get('memory_limit');
+  if (preg_match('/^(\d+)(.)$/', $memory_limit, $matches)) {    
+      if ($matches[2] == 'M') {
+          $memory_limit = $matches[1]*1024*1024; // nnnM -> nnn MB          
+          //die(var_dump($memory_limit));
+      } else if ($matches[2] == 'K') {
+          $memory_limit = $matches[1] * 1024; // nnnK -> nnn KB
+      }
+  }
+  
+  //die(var_dump($memory_limit));
+  $chunk_size = $memory_limit/2;
+  if($memory_limit < 0) $chunk_size = $filesize;
+  //exit;
+  if (ob_get_level()) ob_end_clean();
+  $filesize = filesize($file);
+
+  
+  $offset = 0;
+  $length = $filesize;
+  
+  if ( isset($_SERVER['HTTP_RANGE']) ) {
+      // if the HTTP_RANGE header is set we're dealing with partial content  
+      $partialContent = true;  
+      // find the requested range
+      // this might be too simplistic, apparently the client can request
+      // multiple ranges, which can become pretty complex, so ignore it for now
+      preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);  
+      $offset = intval($matches[1]);
+      $length = (($matches[2]) ? intval($matches[2]) : $filesize) - $offset;
+  } else {
+      $partialContent = false;
+      header('HTTP/1.1 200 OK');
+  }
+   
+  if ( $partialContent ) {
+      // output the right headers for partial content 
+      header('HTTP/1.1 206 Partial Content');  
+      header('Content-Range: bytes ' . $offset . '-' . ($offset + $length -1 ) . '/' . $filesize);
+  }
+  
+  // output the regular HTTP headers
+  header('Content-Description: File Transfer');
+  header('Content-Type: application/octet-stream');
+  header('Content-Disposition: attachment; filename="'.basename($file).'"');
+  header('Accept-Ranges: bytes');
+  
+  // don't forget to send the data too
+  $file = fopen($file, 'r'); 
+  // seek to the requested offset, this is 0 if it's not a partial content request
+  fseek($file, $offset);  
+
+  //echo fread($file, $length);
+
+  while ($length > 0)
+  {
+      if($chunk_size >= $length) $chunk_size = $length;
+      echo fread($file, $chunk_size);
+      $chunk_size -= $length;      
+  }
+  fclose($file);
+  
+  exit;
+  
   header('Content-Description: File Transfer');
   header('Content-Type: application/octet-stream');
   header('Content-Disposition: attachment; filename="'.basename($file).'"');
   header('Expires: 0');
   header('Cache-Control: must-revalidate');
   header('Pragma: public');
-  header('Content-Length: ' . filesize($file));
+  header('Content-Length: ' . $filesize);
   readfile($file);
   exit;
 }
@@ -255,11 +324,26 @@ if($_Page == 'concat'){
     for ($i = 1; $i <= $chunkTotal; $i++) {
       // target temp file
       $temp_file_path = realpath("{$uploadPath}{$fileId}-{$i}.tmp") or returnResponse("error: chunk lost.",415);
+      
+      $chunk_size = 10*1024*1024;
+
+      $handle = fopen($temp_file_path, "r");
+      while (!feof($handle))
+        {
+            $chunk = fread($handle,$chunk_size);
+            file_put_contents("{$uploadPath}{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
+        }
+
+        fclose($handle);
+
+
       // copy chunk
-      $chunk = file_get_contents($temp_file_path);
-      if ( empty($chunk) ) returnResponse("Error: chunk empty", 415);
+      //$chunk = file_get_contents($temp_file_path);
+      //if ( empty($chunk) ) returnResponse("Error: chunk empty", 415);
       // add chunk to main file
-      file_put_contents("{$uploadPath}{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
+      //file_put_contents("{$uploadPath}{$fileType}", $chunk, FILE_APPEND | LOCK_EX);
+
+
       // delete chunk
       unlink($temp_file_path);
       if ( file_exists($temp_file_path) ) returnResponse("error: temp not deleted", 415);
@@ -292,14 +376,13 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
   <meta charset="utf-8">  
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=10.0, user-scalable=yes">
 
-  <title>file transfer | nacht-adriano</title>
+  <title>simple web file transfer | `'sig kreativ. jetzt.'` | ahaenggli by night</title>
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.css">  
   <link rel="stylesheet" href="//cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">  
-  
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/7.8.7/polyfill.min.js"></script>
+  
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.js"></script>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
@@ -310,7 +393,11 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
 <body>
 
 <div class="jumbotron text-center">
+  
+  
   <h1>simple web file transfer | <a href="<?php echo $myBaseLink;?>">`'sig kreativ. jetzt.'`</a></h1>  
+
+
   <div class="row form-signin" style="float:right;">
     <?php if($_USER === NULL) { ?>
     <!-- nicht eingeloggt -->
@@ -450,8 +537,7 @@ usort($dateien, function($a, $b) {
         var size = 0;
         var anza = 0;
         var chunks = 0;
-        var ende = null;
-
+        var ende = null;        
 
         Dropzone.autoDiscover = false;
 
@@ -465,7 +551,7 @@ usort($dateien, function($a, $b) {
         parallelChunkUploads: true, // teili parallel ufelade
         chunkSize: 1000000*<?php echo str_replace("M", "", ini_get('upload_max_filesize')); ?>-100,  // size 1'000'000 bytes (~1MB)
         retryChunks: true,   // retry chunks on failure
-        retryChunksLimit: 3, // retry maximum of 3 times (default is 3)
+        retryChunksLimit: 10, // retry maximum of 3 times (default is 3)
         addRemoveLinks: true, // 
         dictDefaultMessage: "<h2>Dröck do druf - oder zieh s'zügs eifach do ine</h2>",
         chunksUploaded: function(file, done) {
@@ -510,19 +596,20 @@ usort($dateien, function($a, $b) {
                   ende = new Date().getTime();
                   let link = "<?php echo $myBaseLink;?>?page=log&csrf_token=<?php echo $_CSRFTOKEN;?>&start=" + start + "&ende=" + ende + "&size=" + size + "&anzahl=" + anza+ "&chunks=" + chunks;
                   //alert(link);
-                  fetch(link)
-                  .then(function (response) {
-                    return response.json();
-                  })
-                  .then(function (myJson) {
-                    //console.log(myJson);
-                    location.reload();
-                  })
-                  .catch(function (error) {
-                    console.log("Error: " + error);
-                    location.reload();
-                  });
-                  
+
+                  $.ajax ({ url : link,                          
+                     cache: false,                                
+                       type: 'POST',                              
+                           data:{ 
+                              csrf_token:"<?php echo $_CSRFTOKEN ; ?>"},                           
+                              error: function(xhr){                                         
+                                      location.reload();
+                                  },                                 
+                                   success: function(response){     
+                                    location.reload();
+                                      
+                                   }   });  
+       
                   //location.reload();
         });
            
