@@ -2,3 +2,7 @@
 uploads/*
 !uploads/.gitkeep
 config.php
+downloadlinks.php
+uploadlinks.php
+Thumbs.db
+log_*.log

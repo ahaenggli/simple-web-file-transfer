@@ -8,20 +8,30 @@ $sso_app="013675635df2f5dcaab6e20fb1c87d89"; // key vom nas
 
 $myBaseLink = 'https://'.$_SERVER['HTTP_HOST'].'/';
 
+$page_title = 'simple web file transfer';
+$page_slogan = '`\'refresh\'`';
+$page_dict =  '<h2>Drag & Drop - oder hier klicken</h2>';
+
 $ds = DIRECTORY_SEPARATOR;
 $targetPath = dirname( __FILE__ ) . "{$ds}uploads{$ds}";
 $uploadPath = null;
 
-$foldertokens = [];
-$downloadtokens = [];
+$uploadlinks = [];
+$downloadlinks = [];
 
 if(file_exists("./config.php")) require_once("./config.php");
-if(file_exists($targetPath.$ds.'foldertokens.php')) require_once($targetPath.$ds.'foldertokens.php');
-if(file_exists($targetPath.$ds.'downloadtokens.php')) require_once($targetPath.$ds.'downloadtokens.php');
+if(file_exists('./uploadlinks.php')) require('./uploadlinks.php');
+if(file_exists('./downloadlinks.php')) require('./downloadlinks.php');
 
 // kein Zeit-Limit
 //ignore_user_abort(true);
 set_time_limit(0);
+
+header("Expires: 0");
+header("Last-Modified: " . gmdate("D, d M Y H:i:s") . " GMT");
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Cache-Control: post-check=0, pre-check=0", false);
+header("Pragma: no-cache");
 
 $dir = new DirectoryIterator($targetPath);
 /** globale funktionen */
@@ -63,7 +73,7 @@ if(isset($_GET['page']) && !isset($_POST['page'])) $_POST['page']  = $_GET['page
 if(isset($_POST['page'])  && !hash_equals($_CSRFTOKEN , $_POST['csrf_token'])) returnResponse("csrf_token invalid ".$_CSRFTOKEN, "error", 403); 
 
 //Page: sso, nichts, upload, concat, folder-zeugs
-if(!in_array($_POST['page'], ['sso', 'sso-logout', 'upload', 'concat', 'create_uploadFolder', 'create_uploadlink', 'create_downloadlink', 'log']) && !empty($_POST['page'])) returnResponse("page not found", "error", 404); 
+if(!in_array($_POST['page'], ['sso', 'sso-logout', 'upload', 'concat', 'create_uploadFolder', 'create_uploadlink', 'create_downloadlink', 'remove_uploadlink', 'remove_downloadlink']) && !empty($_POST['page'])) returnResponse("page not found", "error", 404); 
 $_Page = $_POST['page'];
 
 //SSO Access-Token
@@ -72,7 +82,7 @@ if(isset($_SESSION["sso_accesstoken"])) $sso_accesstoken = $_SESSION["sso_access
 if(!isset($_POST['page']) && isset($_POST['sso_accesstoken'])){returnResponse("sso not found", "error", 404); }
 elseif(isset($_POST['sso_accesstoken'])) $sso_accesstoken=$_POST['sso_accesstoken'];
 
-$foldertoken = '';
+$uploadlink = '';
 $folderhash  = '';
 
 if(isset($sso_accesstoken)){
@@ -93,41 +103,32 @@ if(isset($sso_accesstoken)){
 // Hätte vorher abgehandelt werden müssen...
 if($_Page == 'sso') returnResponse("sso invalid", "error", 403); 
 
-// log
-if($_Page == 'log'){
-  echo '{';
-  $log = date("Y-m-d H:i:s").'|'.$_GET['start'].'|'.$_GET['ende'].'|'.$_GET['size'].'|'.$_GET['anzahl'].'|'.$_GET['chunks'].'|'."\n";
-  file_put_contents('./log_'.date("Y-m-d").'.log', $log, FILE_APPEND | LOCK_EX);
-  die('}');
-}
-
-
-if(isset($_POST['foldertoken']) && !empty($_POST['foldertoken'])) $_GET['foldertoken'] = $_POST['foldertoken'];
-if(isset($_GET['foldertoken']) && !empty($_GET['foldertoken'])){
+if(isset($_POST['uploadlink']) && !empty($_POST['uploadlink'])) $_GET['uploadlink'] = $_POST['uploadlink'];
+if(isset($_GET['uploadlink']) && !empty($_GET['uploadlink'])){
   
-  if(isset($foldertokens[$_GET['foldertoken']])) {
-    $foldertoken = $foldertokens[$_GET['foldertoken']];
-    $folderhash = $_GET['foldertoken'];
-    $uploadPath = realpath($foldertoken).$ds;
+  if(isset($uploadlinks[$_GET['uploadlink']])) {
+    $uploadlink = $uploadlinks[$_GET['uploadlink']];
+    $folderhash = $_GET['uploadlink'];
+    $uploadPath = realpath($uploadlink).$ds;
   }
   else  returnResponse("token invalid", "error", 403); 
   
-  if(empty($foldertoken)) returnResponse("token invalid", "error", 403);
+  if(empty($uploadlink)) returnResponse("token invalid", "error", 403);
 }
 
 // Upload i.O. falls eingelogg ODER FolderUpload-Token ist i.O.
 if(!$_allowUpload && $_USER !== NULL) $_allowUpload = true;
-elseif(!empty($foldertoken))  $_allowUpload = true;
+elseif(!empty($uploadlink))  $_allowUpload = true;
 
 $cd = '';
 
 if(isset($_POST['cd']) && !empty($_POST['cd']) && $_allowUpload) $_GET['cd'] = $_POST['cd'];
 if(isset($_GET['cd']) && !empty($_GET['cd']) && $_allowUpload){ 
  $tmp = realpath($targetPath.$_GET['cd'].$ds).$ds;
- if(!empty($foldertoken)) $tmp = realpath($foldertoken.$_GET['cd'].$ds).$ds;
- //die($foldertoken);
+ if(!empty($uploadlink)) $tmp = realpath($uploadlink.$_GET['cd'].$ds).$ds;
+ //die($uploadlink);
 
- if(!empty($foldertoken) && strpos($tmp, $foldertoken) === false) returnResponse("token ft invalid", "error", 403);
+ if(!empty($uploadlink) && strpos($tmp, $uploadlink) === false) returnResponse("token ft invalid", "error", 403);
  if(!empty($uploadPath)  && strpos($tmp, $uploadPath) === false)  returnResponse("token up invalid", "error", 403);
  if(file_exists($tmp)) {
    $cd = $_GET['cd'];
@@ -138,10 +139,10 @@ if(isset($_GET['cd']) && !empty($_GET['cd']) && $_allowUpload){
 if(empty($uploadPath) && $_USER !== NULL) $uploadPath = $targetPath;
 
 
-if(isset($_GET['downloadtoken'])){
-  if(!array_key_exists($_GET['downloadtoken'], $downloadtokens)) returnResponse("downloadtoken invalid", 404);
-  $file = $downloadtokens[$_GET['downloadtoken']];
-  if(!file_exists($file)) returnResponse("downloadtoken invalid", 404);
+if(isset($_GET['download'])){
+  if(!array_key_exists($_GET['download'], $downloadlinks)) returnResponse("downloadlink invalid", 404);
+  $file = $downloadlinks[$_GET['download']];
+  if(!file_exists($file)) returnResponse("downloadlink invalid", 404);
   
   // damit kein out of memory kommt
   $memory_limit = ini_get('memory_limit');
@@ -155,7 +156,7 @@ if(isset($_GET['downloadtoken'])){
   }
   
   //die(var_dump($memory_limit));
-  $chunk_size = $memory_limit/2;
+  $chunk_size = $memory_limit*0.8;
   if($memory_limit < 0) $chunk_size = $filesize;
   //exit;
   if (ob_get_level()) ob_end_clean();
@@ -191,6 +192,7 @@ if(isset($_GET['downloadtoken'])){
   header('Content-Disposition: attachment; filename="'.basename($file).'"');
   header('Accept-Ranges: bytes');
   
+  if ( $partialContent ) {
   // don't forget to send the data too
   $file = fopen($file, 'r'); 
   // seek to the requested offset, this is 0 if it's not a partial content request
@@ -205,17 +207,14 @@ if(isset($_GET['downloadtoken'])){
       $chunk_size -= $length;      
   }
   fclose($file);
-  
+} else readfile($file);
+
   exit;
-  
-  header('Content-Description: File Transfer');
-  header('Content-Type: application/octet-stream');
-  header('Content-Disposition: attachment; filename="'.basename($file).'"');
   header('Expires: 0');
   header('Cache-Control: must-revalidate');
   header('Pragma: public');
   header('Content-Length: ' . $filesize);
-  readfile($file);
+  
   exit;
 }
 
@@ -224,15 +223,15 @@ if($_Page == 'create_uploadlink'){
  if(!empty($_POST['folder']) && $_USER != NULL){
    $tmp = realpath($targetPath.$_POST['folder'].$ds);
    if(is_dir($tmp)){
-    
-    $key = array_search($tmp, $foldertokens);
+   if(file_exists('./uploadlinks.php')) include('./uploadlinks.php');
+    $key = array_search($tmp, $uploadlinks);
     if($key  === false){      
-      while($key === false || array_key_exists($key, $foldertokens)) $key = bin2hex(random_bytes(16));
-      $foldertokens[$key] = $tmp;
-      $txt = '<?php $foldertokens = [';
-      foreach($foldertokens as $k=>$v) if(is_dir($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
+      while($key === false || array_key_exists($key, $uploadlinks)) $key = bin2hex(random_bytes(16));
+      $uploadlinks[$key] = $tmp;
+      $txt = '<?php $uploadlinks = [';
+      foreach($uploadlinks as $k=>$v) if(is_dir($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
       $txt .=']; ?>';
-      file_put_contents($targetPath.$ds.'foldertokens.php', $txt);           
+      file_put_contents('./uploadlinks.php', $txt,  LOCK_EX);           
     }
 
     die($key);
@@ -248,15 +247,15 @@ if($_Page == 'create_downloadlink'){
     $tmp = realpath($targetPath.$_POST['file']);
     //die($tmp);
     if(is_file($tmp)){
-     
-     $key = array_search($tmp, $downloadtokens);
+    if(file_exists('./downloadlinks.php')) include('./downloadlinks.php');
+     $key = array_search($tmp, $downloadlinks);
      if($key  === false){      
-       while($key === false || array_key_exists($key, $downloadtokens)) $key = bin2hex(random_bytes(16));
-       $downloadtokens[$key] = $tmp;
-       $txt = '<?php $downloadtokens = [';
-       foreach($downloadtokens as $k=>$v) if(is_file($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
+       while($key === false || array_key_exists($key, $downloadlinks)) $key = bin2hex(random_bytes(16));
+       $downloadlinks[$key] = $tmp;
+       $txt = '<?php $downloadlinks = [';
+       foreach($downloadlinks as $k=>$v) if(is_file($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
        $txt .=']; ?>';
-       file_put_contents($targetPath.$ds.'downloadtokens.php', $txt);           
+       file_put_contents('./downloadlinks.php', $txt);           
      }
  
      die($key);
@@ -266,10 +265,42 @@ if($_Page == 'create_downloadlink'){
   returnResponse("Keine Berechtigung", "error", 403);
  }
 
+ 
+if(!empty($_GET['remove_uploadlink']) && $_USER != NULL){    
+    $key = $_GET['remove_uploadlink'];
+    if(file_exists('./uploadlinks.php')) include('./uploadlinks.php');
+    if(!array_key_exists($key, $uploadlinks)) {}//returnResponse($key." invalid", 404);
+    else{
+      unset($uploadlinks[$key]);      
+      //var_dump($uploadlinks);      
+      $txt = '<?php $uploadlinks = [';
+      foreach($uploadlinks as $k=>$v) if(is_dir($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
+      $txt .=']; ?>';
+      file_put_contents('./uploadlinks.php', $txt,  LOCK_EX);               
+      //var_dump($txt);
+      //die();
+    }            
+    //die();
+}
+
+if(!empty($_GET['remove_downloadlink']) && $_USER != NULL){    
+  $key = $_GET['remove_downloadlink'];
+  if(file_exists('./downloadlinks.php')) include('./downloadlinks.php');
+  if(!array_key_exists($key, $downloadlinks)) {}//returnResponse($key." invalid", 404);
+  else{
+    unset($downloadlinks[$key]);            
+    $txt = '<?php $downloadlinks = [';
+    foreach($downloadlinks as $k=>$v) if(is_file($v) && file_exists($v)) $txt .= "'$k'=>'$v',";
+    $txt .=']; ?>';
+    file_put_contents('./downloadlinks.php', $txt,  LOCK_EX);               
+  }            
+}
+
+
 if($_Page == 'create_uploadFolder' && $_allowUpload){
   $foldername = $_POST['folder'];
   $tmp = $uploadPath.$foldername.$ds;
-  if(!empty($foldertoken) && strpos($tmp, $foldertoken) === false) returnResponse("token ft invalid", "error", 403);
+  if(!empty($uploadlink) && strpos($tmp, $uploadlink) === false) returnResponse("token ft invalid", "error", 403);
   if(!empty($uploadPath)  && strpos($tmp, $uploadPath) === false)  returnResponse("token up invalid", "error", 403);
   if(!file_exists($tmp)) mkdir($tmp, 0644);
 }
@@ -354,7 +385,7 @@ if($_Page == 'concat'){
 
 if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
   $tmp = realpath($uploadPath.$ds.$_GET['delete']);  
-  if(!empty($foldertoken) && strpos($tmp, $foldertoken) === false) returnResponse("token ft invalid", "error", 403);
+  if(!empty($uploadlink) && strpos($tmp, $uploadlink) === false) returnResponse("token ft invalid", "error", 403);
   if(!empty($uploadPath)  && strpos($tmp, $uploadPath) === false)  returnResponse("token up invalid", "error", 403);
   if(is_file($tmp)) unlink($tmp);
   elseif(is_dir($tmp)){
@@ -376,7 +407,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
   <meta charset="utf-8">  
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=10.0, user-scalable=yes">
 
-  <title>simple web file transfer | `'sig kreativ. jetzt.'` | ahaenggli by night</title>
+  <title><?php echo $page_title;?></title>
 
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.css">  
@@ -395,7 +426,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
 <div class="jumbotron text-center">
   
   
-  <h1>simple web file transfer | <a href="<?php echo $myBaseLink;?>">`'sig kreativ. jetzt.'`</a></h1>  
+  <h1>simple web file transfer | <a href="<?php echo $myBaseLink;?>"><?php echo $page_slogan;?></a></h1>  
 
 
   <div class="row form-signin" style="float:right;">
@@ -421,13 +452,13 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
       <h3>
       
       <?php
-      if(!empty($folderhash)) $myBaseLink2 = $myBaseLink.'?foldertoken='.$folderhash;
+      if(!empty($folderhash)) $myBaseLink2 = $myBaseLink.'?uploadlink='.$folderhash;
       else $myBaseLink2 = $myBaseLink.'?';
       $dirs = $uploadPath;
-      //if(!empty($foldertoken)) $dirs = $foldertoken;
-      if(!empty($foldertoken)) $dirs = str_replace(realpath($foldertoken.$ds.''), '', $dirs);
+      //if(!empty($uploadlink)) $dirs = $uploadlink;
+      if(!empty($uploadlink)) $dirs = str_replace(realpath($uploadlink.$ds.''), '', $dirs);
       $dirs = str_replace($targetPath, '', $dirs);
-      //echo ':'.realpath($foldertoken.'/../');
+      //echo ':'.realpath($uploadlink.'/../');
       //die($dirs);
       $dirs = explode($ds, $dirs);
       $tmp = '/';
@@ -436,7 +467,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
 
       for($i = 0; $i < count($dirs); $i++){
         $fldr = $dirs[$i];      
-        if($i == 0 && realpath($uploadPath.$ds) == realpath($foldertoken.$ds)) continue;
+        if($i == 0 && realpath($uploadPath.$ds) == realpath($uploadlink.$ds)) continue;
         if(!empty($fldr)) {
           $tmp .= $fldr.'/';
           echo '<a href="'.$myBaseLink2.'&cd='.$tmp.'">'.$fldr.'</a> / ';
@@ -448,7 +479,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
       <form action="<?php echo $myBaseLink;?>" method="post" enctype="multipart/form-data" class="dropzone" id="image-upload">
       <input type="hidden" name="page" value="upload">
       <input type="hidden" name="csrf_token" value="<?php echo $_CSRFTOKEN;?>">
-      <input type="hidden" name="foldertoken" value="<?php echo $folderhash;?>">
+      <input type="hidden" name="uploadlink" value="<?php echo $folderhash;?>">
       <input type="hidden" name="cd" value="<?php echo $cd;?>">
       </form>
     </div>
@@ -463,16 +494,16 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
             <form action="<?php echo $myBaseLink2;?>&cd=<?php echo $cd;?>" method="post">
       <input type="hidden" name="page" value="create_uploadFolder">
       <input type="hidden" name="csrf_token" value="<?php echo $_CSRFTOKEN;?>">
-      Ordner <input type="text" name="folder" value="<?php echo $_USER['user_name'];?>">
-      <input type="submit" value="erstellä">
+      Ordner <input type="text" name="folder" value="" placeholder="<?php echo $_USER['user_name'];?>">
+      <input type="submit" value="erstellen">
       </form>     
            
             <table id="myTable">
               
             <thead>
             <tr>
-                <th>Namä</th>
-                <th class="right">Grössi</th>
+                <th>Name</th>
+                <th class="right">Grösse</th>
                 <th class="right">Datum</th>
                 <th></th>
             </tr>
@@ -483,7 +514,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
     $folders = [];
     $dateien = [];
     $repl = $targetPath;
-    if(!empty($foldertoken)) $repl = $foldertoken;
+    if(!empty($uploadlink)) $repl = $uploadlink;
     foreach ($dir as $fileinfo) {
         if ($fileinfo->isDir()) {          
               if(!$fileinfo->isDot()) $folders[] =  [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(),             
@@ -498,26 +529,37 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
     );
 
     foreach($folders as $fileinfo){
+      $key = (array_search($repl.$fileinfo[3], $uploadlinks));
       echo '<tr>
-              <td><a href="?foldertoken='.$folderhash.'&cd='.$fileinfo[3].'">'.$fileinfo[0].'</a></td>
+              <td><a href="?uploadlink='.$folderhash.'&cd='.$fileinfo[3].'">'.$fileinfo[0].'</a></td>
               <td class="right">Ordner</td>
               <td class="right">'.date("d.m.Y H:i:s", $fileinfo[2]).'</td>';
-      echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>':'<td><a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a> | <a data-address="'.$fileinfo[3].'" class="share-folder" href="#">[Uploadlink]</a> </td>';
+      echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>'
+                            :
+                            '<td><a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a> | 
+                              <a data-address="'.$fileinfo[3].'" class="share-folder" href="#">[Uploadlink]</a> '.
+                            (($key !== false)? '| <a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&remove_uploadlink='.$key.'">[Link entfernen]</a> ':'')
+                            .'</td>';
       echo '</tr>';
     }
 
-
-usort($dateien, function($a, $b) {
+  usort($dateien, function($a, $b) {
   return strcasecmp((string)trim($a[0]), (string)trim($b[0]));
   }
 );
 
     foreach($dateien as $fileinfo){
+      $key = (array_search($repl.$fileinfo[3], $downloadlinks));
       echo '<tr>
               <td>'.$fileinfo[0].'</td>
               <td class="right">'.$fileinfo[1].' bytes</td>
               <td class="right">'.date("d.m.Y H:i:s", $fileinfo[2]).'</td>';
-      echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>':'<td><a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a> | <a data-address="'.$fileinfo[3].'" class="download-file" href="#">[Downloadlink]</a> </td>';
+      echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>'
+                              :
+                              '<td><a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a> | 
+                                   <a data-address="'.$fileinfo[3].'" class="download-file" href="#">[Downloadlink]</a> '.
+                              (($key !== false)? ' | <a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&remove_downloadlink='.$key.'">[Link entfernen]</a>':'')
+                              .'</td>';
       echo '</tr>';
   }
 
@@ -543,7 +585,7 @@ usort($dateien, function($a, $b) {
 
         var myDropzone = new Dropzone("#image-upload",   {
         //TuttiQuanti - Filtermöglichkeiten => acceptedFiles: "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.ppt,.pptx,.pages,.odt,.rtf,.heif,.hevc",
-        maxFilesize: 10240, // megabytes
+        maxFilesize: 0, // kein Limit
         timeout: 0, // kein Timeout
         parallelUploads: 1, // nötzt nüd, so schadets höffetli au nüd
         chunking: true,      // jo, mer wänd euses File ufteile
@@ -553,12 +595,12 @@ usort($dateien, function($a, $b) {
         retryChunks: true,   // retry chunks on failure
         retryChunksLimit: 10, // retry maximum of 3 times (default is 3)
         addRemoveLinks: true, // 
-        dictDefaultMessage: "<h2>Dröck do druf - oder zieh s'zügs eifach do ine</h2>",
+        dictDefaultMessage: "<?php echo $page_dict;?>",
         chunksUploaded: function(file, done) {
           // All chunks have been uploaded. Perform any other actions
           let currentFile = file;
           var xhr = new XMLHttpRequest();
-          xhr.open('POST', '/', true);
+          xhr.open('POST', '/index.php', true);
           //Send the proper header information along with the request
           xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
           xhr.onload = function() {
@@ -574,7 +616,7 @@ usort($dateien, function($a, $b) {
                   Dropzone._errorProcessing([currentFile], xhr.responseText);
               }
           };
-          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&foldertoken=<?php echo $folderhash;?>&cd=<?php echo $cd;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&fullpath=" + currentFile.fullPath + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
+          xhr.send("page=concat&csrf_token=<?php echo $_CSRFTOKEN;?>&uploadlink=<?php echo $folderhash;?>&cd=<?php echo $cd;?>&dzuuid=" + currentFile.upload.uuid + "&dztotalchunkcount=" + currentFile.upload.totalChunkCount + "&fullpath=" + currentFile.fullPath + "&dzfilename=" + currentFile.name); //currentFile.name.substr( (currentFile.name.lastIndexOf('.') +1) )
         },
 
         error: function (file, response) { alert(response);},
@@ -592,29 +634,12 @@ usort($dateien, function($a, $b) {
                         data.append("fullPath", file.fullPath);                                                
                     }
                 });
+
                 this.on("queuecomplete", function() {
-                  ende = new Date().getTime();
-                  let link = "<?php echo $myBaseLink;?>?page=log&csrf_token=<?php echo $_CSRFTOKEN;?>&start=" + start + "&ende=" + ende + "&size=" + size + "&anzahl=" + anza+ "&chunks=" + chunks;
-                  //alert(link);
+                   location.reload();                
+                });
 
-                  $.ajax ({ url : link,                          
-                     cache: false,                                
-                       type: 'POST',                              
-                           data:{ 
-                              csrf_token:"<?php echo $_CSRFTOKEN ; ?>"},                           
-                              error: function(xhr){                                         
-                                      location.reload();
-                                  },                                 
-                                   success: function(response){     
-                                    location.reload();
-                                      
-                                   }   });  
-       
-                  //location.reload();
-        });
-           
-
-      },
+        },
         //success: function (file, response) {_this = this; setTimeout(function(){_this.removeFile(file);}, 3000);},
   }
 );
@@ -666,7 +691,7 @@ $(document).ready( function () {
                               var protocol = location.protocol;
                               var slashes = protocol.concat("//");
                               var host = slashes.concat(window.location.hostname);
-                              let lnk = host+'?foldertoken='+response;
+                              let lnk = host+'?uploadlink='+response;
                               const el = document.createElement('textarea');
                               el.value = lnk;
                               el.setAttribute('readonly', '');
@@ -677,6 +702,7 @@ $(document).ready( function () {
                               document.execCommand('copy');
                               document.body.removeChild(el);
                               alert('Link ist nun in Zwischenablage:'+"\n"+lnk);
+                              location.reload();        
                               }   });   
       
     });
@@ -700,7 +726,7 @@ $(document).ready( function () {
                               var protocol = location.protocol;
                               var slashes = protocol.concat("//");
                               var host = slashes.concat(window.location.hostname);
-                              let lnk = host+'?downloadtoken='+response;
+                              let lnk = host+'?download='+response;
                               const el = document.createElement('textarea');
                               el.value = lnk;
                               el.setAttribute('readonly', '');
@@ -711,6 +737,7 @@ $(document).ready( function () {
                               document.execCommand('copy');
                               document.body.removeChild(el);
                               alert('Link ist nun in Zwischenablage:'+"\n"+lnk);
+                              location.reload();        
                               }   });   
       
     });   
@@ -787,13 +814,13 @@ var logout_button = document.getElementById("logout-button");
 if(logout_button !== null) logout_button.addEventListener('click' , myEventLogOut, false); 
 
 <?php
-if(!empty($_GET['delete'])){
+if(!empty($_GET['delete']) || !empty($_GET['remove_uploadlink'])|| !empty($_GET['remove_downloadlink'])){
   echo '
   var URL = location.href.split("?");
   var params = URL[1].split("&");
   URL[0] = URL[0] + "?";
   for(var item in params) {
-    if(!params[item].startsWith("delete=")) URL[0] = URL[0] + "&" + params[item];
+    if(!params[item].startsWith("delete=") && !params[item].startsWith("remove_")) URL[0] = URL[0] + "&" + params[item];
   }
   //alert(URL[0]);
   window.history.pushState(\'object\', document.title, URL[0]);

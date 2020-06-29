@@ -14,8 +14,9 @@ Eingeloggt ($_USER is not NULL):
 * Dateien und Ordner hochladen
 * Uploadlinks generieren/sehen (für Gäste) 
 * Downloadlinks generieren/sehen (für Gäste)
-* Dateien/Ordner löschen
+* Dateien/Ordner löschen (Uploadlink/Downloadlink werden ebenfalls gelöscht)
 * Download nur via Downloadlink möglich
+* Uploadlink/Downloadlink entfernen (Dateien bleiben)
 
 Gast ($_USER is NULL):
 * Login-Button
@@ -26,11 +27,5 @@ Gast ($_USER is NULL):
 * Download nur via Downloadlink möglich
  
 ## ToDo's
-* Foldertoken erneuern/löschen (inhalt belassen)
-* Downloadtoken erneuern/löschen (inhalt belassen)
-* File/Folderliste alphabetisch sortieren
-* Einheitliches Wording in Source
-  - Uploadlink anstelle (Upload/Folder)token
-  - Downloadlink anstelle Downloadtoken 
 * $.ajax durch XMLHttpRequest ersetzen (möglichst auf jQuery verzichten) 
 * OWASP Top 10 prüfen/absichern
