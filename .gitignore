@@ -4,3 +4,4 @@ uploads/*
 config.php
 Thumbs.db
 log_*.log
+data.sqlite
