@@ -616,10 +616,10 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
     if(!empty($uploadlink)) $repl = $uploadlink;
     foreach ($dir as $fileinfo) {
         if ($fileinfo->isDir()) {          
-              if(!$fileinfo->isDot() && !in_array($fileinfo->getFilename(),['#recycle', '@eaDir'])) $folders[] =  [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(),             
+              if(!$fileinfo->isDot() && !in_array($fileinfo->getFilename(),['#recycle', '@eaDir'])) $folders[] =  [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getMTime(),             
               str_replace($repl, '', $fileinfo->getPathname()), $fileinfo->getPathname()
             ];
-        } else $dateien[] = [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(), str_replace($repl, '', $fileinfo->getPathname()), $fileinfo->getPathname()]; //echo '<tr><td>'.$fileinfo->getFilename().'</td><td>'.$fileinfo->getSize().' bytes</td></tr>';
+        } else $dateien[] = [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getMTime(), str_replace($repl, '', $fileinfo->getPathname()), $fileinfo->getPathname()]; //echo '<tr><td>'.$fileinfo->getFilename().'</td><td>'.$fileinfo->getSize().' bytes</td></tr>';
     }
 
     usort($folders, function($a, $b) {
