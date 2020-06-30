@@ -25,8 +25,59 @@ $sql =<<<EOF
       value       TEXT     NOT NULL UNIQUE
       );
 EOF;
-
 $ret = $db->exec($sql);
+
+$sql =<<<EOF
+      CREATE TABLE IF NOT EXISTS pfadbesitzer
+      (pfad       TEXT  NOT NULL UNIQUE,
+       besitzer   TEXT
+      );
+EOF;
+$ret = $db->exec($sql);
+
+function get_besitzer($key){
+  global $db;
+  if(is_dir($key)) $key = realpath($key);
+  $besitzer = posix_getpwuid(fileowner($key))['name'];
+  
+  $ret = $db->query('select * from pfadbesitzer where pfad="'.$key.'";');
+  
+  while($row = $ret->fetchArray(SQLITE3_ASSOC) ) {     
+    //print_r($row['pfad']);
+     if(file_exists($row['pfad'])) $besitzer = $row['besitzer'];
+     else remove_besitzer($row['pfad']);
+  }
+
+  return $besitzer;
+
+}
+
+function add_besitzer($key, $value){
+  global $db;
+  if(is_dir($key)) $key = realpath($key);
+  $sql ='INSERT INTO pfadbesitzer (pfad,besitzer)  VALUES ("'.$key.'","'.$value.'"); ';
+  $ret = $db->exec($sql);
+  if(!$ret) {
+      echo $db->lastErrorMsg();
+  } 
+}
+
+function remove_besitzer($key){
+  global $db;
+  if(is_dir($key)) $key = realpath($key);
+  $sql ='delete from pfadbesitzer where pfad = "'.$key.'";';
+  $ret = $db->exec($sql);
+  if(!$ret) {
+      echo $db->lastErrorMsg();
+  } 
+
+  $ret = $db->query('select * from pfadbesitzer;');
+  while($row = $ret->fetchArray(SQLITE3_ASSOC) ) {     
+     if(!file_exists($row['pfad']))  remove_besitzer($row['pfad']);
+  }
+
+}
+
 
 function uploadlinks($key=null){
   global $db;
@@ -154,6 +205,7 @@ if(isset($sso_accesstoken)){
   if($json_resp["success"]==true){
     $_USER = $json_resp["data"];
     $_SESSION["sso_accesstoken"] = $sso_accesstoken;      
+    //print_r($_USER);
     if($_Page == 'sso'){ http_response_code(200); echo json_encode($_USER); exit;} 
   }else {
     unset($_SESSION["sso_accesstoken"]);
@@ -340,7 +392,11 @@ if($_Page == 'create_uploadFolder' && $_allowUpload){
   $tmp = $uploadPath.$foldername.$ds;
   if(!empty($uploadlink) && strpos($tmp, $uploadlink) === false) returnResponse("token ft invalid", "error", 403);
   if(!empty($uploadPath)  && strpos($tmp, $uploadPath) === false)  returnResponse("token up invalid", "error", 403);
-  if(!file_exists($tmp)) mkdir($tmp, 0644);
+  if(!file_exists($tmp)){
+     mkdir($tmp, 0644);    
+     if($_USER != NULL) add_besitzer($tmp, $_USER['user_name']); 
+  }
+
 }
 
 // Upload-Page
@@ -387,6 +443,7 @@ if($_Page == 'concat'){
     if($fullpath != 'undefined' && !empty($fullpath)) {
       $fileType = $fullpath;//.$ds.$fileType;
       mkdir(dirname($uploadPath.$ds.$fileType), 0777, true);
+      if($_USER != NULL) add_besitzer(dirname($uploadPath.$ds.$fileType), $_USER['user_name']); 
     }
 
     // Teile durchgehen und zusammensetzen
@@ -417,7 +474,7 @@ if($_Page == 'concat'){
       unlink($temp_file_path);
       if ( file_exists($temp_file_path) ) returnResponse("error: temp not deleted", 415);
     }
-
+    if($_USER != NULL) add_besitzer("{$uploadPath}{$fileType}", $_USER['user_name']); 
   exit;
 }
 
@@ -425,13 +482,16 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
   $tmp = realpath($uploadPath.$ds.$_GET['delete']);  
   if(!empty($uploadlink) && strpos($tmp, $uploadlink) === false) returnResponse("token ft invalid", "error", 403);
   if(!empty($uploadPath)  && strpos($tmp, $uploadPath) === false)  returnResponse("token up invalid", "error", 403);
-  if(is_file($tmp)) unlink($tmp);
+  if(is_file($tmp)){ unlink($tmp); remove_besitzer($tmp);}
   elseif(is_dir($tmp)){
      function delTree($dir) {
+      global $ds;
       $files = array_diff(scandir($dir), array('.','..'));
        foreach ($files as $file) {
-         (is_dir("$dir/$file")) ? delTree("$dir/$file") : unlink("$dir/$file");
+         if(is_dir("$dir/$file")){ delTree("$dir/$file"); } 
+         else {unlink("$dir/$file"); remove_besitzer("$dir/$file");}
        }
+       remove_besitzer($dir.$ds);
        return rmdir($dir);
      } 
      delTree($tmp);
@@ -542,6 +602,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
             <tr>
                 <th>Name</th>
                 <th class="right">Grösse</th>
+                <th class="right">Besitzer</th>                
                 <th class="right">Datum</th>
                 <th></th>
             </tr>
@@ -556,9 +617,9 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
     foreach ($dir as $fileinfo) {
         if ($fileinfo->isDir()) {          
               if(!$fileinfo->isDot() && !in_array($fileinfo->getFilename(),['#recycle', '@eaDir'])) $folders[] =  [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(),             
-              str_replace($repl, '', $fileinfo->getPathname())
+              str_replace($repl, '', $fileinfo->getPathname()), $fileinfo->getPathname()
             ];
-        } else $dateien[] = [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(), str_replace($repl, '', $fileinfo->getPathname())]; //echo '<tr><td>'.$fileinfo->getFilename().'</td><td>'.$fileinfo->getSize().' bytes</td></tr>';
+        } else $dateien[] = [$fileinfo->getFilename(), $fileinfo->getSize(), $fileinfo->getCTime(), str_replace($repl, '', $fileinfo->getPathname()), $fileinfo->getPathname()]; //echo '<tr><td>'.$fileinfo->getFilename().'</td><td>'.$fileinfo->getSize().' bytes</td></tr>';
     }
 
     usort($folders, function($a, $b) {
@@ -568,9 +629,11 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
 
     foreach($folders as $fileinfo){
       $key = (array_search($repl.$fileinfo[3], uploadlinks()));
+      //print_r(posix_getpwuid(fileowner($repl.$fileinfo[0])));
       echo '<tr>
               <td><a href="?uploadlink='.$folderhash.'&cd='.$fileinfo[3].'">'.$fileinfo[0].'</a></td>
               <td class="right">Ordner</td>
+              <td class="right">'.get_besitzer($fileinfo[4].$ds).'</td>
               <td class="right">'.date("d.m.Y H:i:s", $fileinfo[2]).'</td>';
       echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2 .'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>'
                             :
@@ -591,6 +654,7 @@ if(isset($_GET['delete']) && !empty($_GET['delete']) && $_allowUpload){
       echo '<tr>
               <td>'.$fileinfo[0].'</td>
               <td class="right">'.$fileinfo[1].' bytes</td>
+              <td class="right">'.get_besitzer($fileinfo[4]).'</td>
               <td class="right">'.date("d.m.Y H:i:s", $fileinfo[2]).'</td>';
       echo ($_USER == NULL)? '<td><a href="'.$myBaseLink2.'&cd='.dirname($fileinfo[3]).'&delete='.basename($fileinfo[3]).'">[löschen]</a></td>'
                               :
